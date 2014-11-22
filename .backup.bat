@@ -2,33 +2,36 @@
 setlocal
 
 REM CONFIG 
-set NUM_THREADS=8
-set DICT_SIZE=1g
-set RETENTION=6
-set RECOVERY_RECORDS=3
+set "NUM_THREADS=8"
+set "DICT_SIZE=1g"
+set "RETENTION=6"
+set "RECOVERY_RECORDS=3"
+set "MAX_PARALLEL_COPY=7"
 
 title Backup
 
 REM Get date locale independent 
-set _yyyy=0000
-set _mm=00
+set "_yyyy=0000"
+set "_mm=00"
 FOR /F "skip=1 tokens=1-6" %%G IN ('WMIC Path Win32_LocalTime Get Day^,Hour^,Minute^,Month^,Second^,Year /Format:table') DO (
    IF "%%~L"=="" GOTO :EXIT
-      set _yyyy=%%L
-      set _mm=00%%J
+      set "_yyyy=%%L"
+      set "_mm=00%%J"
 )
 :EXIT
 REM Pad digits with leading zeros
-set _mm=%_mm:~-2%
+set "_mm=%_mm:~-2%"
 
-set LOGFILE=backup.log
-set WINRAR=%ProgramFiles%\WinRAR\winrar.exe
-set YEAR=%_yyyy%
-set MONTH=%_mm%
-set BACKUPFILE=%YEAR%-%MONTH%_backup.rar
-set INFILE=.LocationsToBackup.lst
-set EXCLUDE_FILE=.ExcludeFromBackup.lst
-set ADDIT_FILE=.AdditionalLocations.lst
+set "LOGFILE=backup.log"
+set "WINRAR=%ProgramFiles%\WinRAR\winrar.exe"
+set "YEAR=%_yyyy%"
+set "MONTH=%_mm%"
+set "BACKUPFILE=%YEAR%-%MONTH%_backup.rar"
+set "INFILE=.LocationsToBackup.lst"
+set "EXCLUDE_FILE=.ExcludeFromBackup.lst"
+set "ADDIT_FILE=.AdditionalLocations.lst"
+set "LOCK_FILES=%temp%\backupwait.%random%.lock"
+for /l %%N in (1 1 %MAX_PARALLEL_COPY%) do set "cpu%%N="
 
 echo.
 echo.
@@ -47,6 +50,7 @@ call:Log "BACKUPFILE:       %BACKUPFILE%"
 call:Log "INFILE:           %INFILE%"
 call:Log "EXCLUDE_FILE:     %EXCLUDE_FILE%"
 call:Log "ADDIT_FILE:       %ADDIT_FILE%"
+call:Log "LOCK_FILES:       %LOCK_FILES%"
 call:Log "NUM_THREADS:      %NUM_THREADS%"
 call:Log "DICT_SIZE:        %DICT_SIZE%"
 call:Log "RETENTION:        %RETENTION%"
@@ -57,8 +61,8 @@ if not exist "%WINRAR%" GOTO :EXIT_2
 if not exist "%INFILE%" GOTO :EXIT_3
 if not exist "%EXCLUDE_FILE%" GOTO :EXIT_4
 
-set /a MONTH_O=%MONTH%-%RETENTION%
-set /a YEAR_O=%YEAR%
+set /a "MONTH_O=%MONTH%-%RETENTION%"
+set /a "YEAR_O=%YEAR%"
 if %RETENTION% EQU 0 GOTO :STOP_RETENTION_CALC
 
 call:Log "Berechne Retention Jahr und Monat:"
@@ -67,8 +71,8 @@ call:Log " YEAR_O:  %YEAR_O%"
 :START
 	if %MONTH_O% GTR 0 GOTO :STOP_RETENTION_CALC
 	if %YEAR_O% LEQ 0 GOTO :STOP_RETENTION_CALC
-	set /a MONTH_O=%MONTH_O%+12
-	set /a YEAR_O=%YEAR_O%-1
+	set /a "MONTH_O=%MONTH_O%+12"
+	set /a "YEAR_O=%YEAR_O%-1"
 	call:Log " MONTH_O: %MONTH_O%"
 	call:Log " YEAR_O: %YEAR_O%"
 GOTO :START
@@ -86,7 +90,7 @@ FOR /F "eol=; tokens=*" %%i in (%EXCLUDE_FILE%) DO (
 echo.
 if %RETENTION% EQU 0 GOTO :RETENTION_END 
 	call:EchoAndLog "Search old Backups" 
-	set NOTHING_DELETED=Y
+	set "NOTHING_DELETED=Y"
 	for %%g in (????-??_backup.rar) do ( 	
 		call:RetentionRemoval "%%~nxg"
 	)
@@ -114,11 +118,40 @@ call:EchoAndLog "calling: %WINRAR% u -m5 -ma5 -md%DICT_SIZE% -mt%NUM_THREADS% -r
 "%WINRAR%" u -m5 -ma5 -md%DICT_SIZE% -mt%NUM_THREADS% -rr%RECOVERY_RECORDS% -t -tl -x@"%EXCLUDE_FILE%" "%BACKUPFILE%" @"%INFILE%" >>"%LOGFILE%" 2>&1
 
 echo.
-call:EchoAndLog "Copying backed up rar file to additional locations"
+call:EchoAndLog "Copying backed up rar file to additional locations in parallel"
+setlocal enableDelayedExpansion
+
+call:Log "Initialize Counter"
+set "PROCESS_START_COUNTER=0"
+set "PROCESS_END_COUNTER=0"
+
+for /l %%N in (1 1 %MAX_PARALLEL_COPY%) do set "END_PROC%%N="
+
+set "LAUNCH=1"
 for /F "tokens=*" %%A in (%ADDIT_FILE%) do ( 
-	call:EchoAndLog " calling copy /V /Y %BACKUPFILE% /B %%A\%BACKUPFILE%"
-	copy /V /Y "%BACKUPFILE%" /B "%%A\%BACKUPFILE%" >>"%LOGFILE%" 2>&1
+	call:EchoAndLog " Copying to %%A"
+	if !PROCESS_START_COUNTER! LSS %MAX_PARALLEL_COPY% (
+		set /a "PROCESS_START_COUNTER+=1"
+		set "NEXT_PROC=!PROCESS_START_COUNTER!"
+	) else (
+		call:Log " Wait for lock before spawning the next copy"
+		call :WaitForLock
+	)
+	call:Log "  PROCESS_START_COUNTER: !PROCESS_START_COUNTER!"
+	set "CURRENT_CMD=copy /V /Y "%BACKUPFILE%" /B "%%A\%BACKUPFILE%""
+	call:Log "  command: !CURRENT_CMD!"
+	call:Log "   process !NEXT_PROC! starting: Call start at !time!"
+    2>nul del %LOCK_FILES%.!NEXT_PROC!
+    start /B "" cmd /C 9>"%LOCK_FILES%.!NEXT_PROC!" !CURRENT_CMD! >nul
+	REM call:EchoAndLog " calling copy /V /Y %BACKUPFILE% /B %%A\%BACKUPFILE%"
+	REM copy /V /Y "%BACKUPFILE%" /B "%%A\%BACKUPFILE%" >>"%LOGFILE%" 2>&1
 )
+set "LAUNCH="
+call:WaitForLock
+setlocal disableDelayedExpansion
+
+call:Log "Delete last Log files"
+2>nul del %LOCK_FILES%.*
 
 echo.
 call:EchoAndLog "Backup done........"
@@ -157,6 +190,31 @@ exit 4
 
 goto:eof
 
+:WaitForLock 
+	for /l %%N in (1 1 %PROCESS_START_COUNTER%) do 2>nul (
+		REM call:Log "check lock for process %%N"
+		if not defined END_PROC%%N (
+			REM call:Log "Proc %%N not finished"
+			if exist "%LOCK_FILES%.%%N" (
+				REM call:Log "%LOCK_FILES%.%%N exists"
+				
+				9>>"%LOCK_FILES%.%%N" (
+					call:Log "   process %%N finished: Could aquire lock at !time!"
+					if defined launch (
+						set "NEXT_PROC=%%N"
+						exit /b
+					)
+					set /a "PROCESS_END_COUNTER+=1"
+					set "END_PROC%%N=1"
+				) 
+				timeout /T 1 > nul
+			)
+		)
+	)
+	if %PROCESS_END_COUNTER% lss %PROCESS_START_COUNTER% (
+		goto :WaitForLock
+	)
+goto:eof
 
 :RetentionRemoval
 	set fileName=%~1
