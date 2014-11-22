@@ -138,13 +138,11 @@ for /F "tokens=*" %%A in (%ADDIT_FILE%) do (
 		call :WaitForLock
 	)
 	call:Log "  PROCESS_START_COUNTER: !PROCESS_START_COUNTER!"
-	set "CURRENT_CMD=copy /V /Y "%BACKUPFILE%" /B "%%A\%BACKUPFILE%""
+	set "CURRENT_CMD=copy /Y /B "%BACKUPFILE%" "%%A\%BACKUPFILE%""
 	call:Log "  command: !CURRENT_CMD!"
 	call:Log "   process !NEXT_PROC! starting: Call start at !time!"
     2>nul del %LOCK_FILES%.!NEXT_PROC!
     start /B "" cmd /C 9>"%LOCK_FILES%.!NEXT_PROC!" !CURRENT_CMD! >nul
-	REM call:EchoAndLog " calling copy /V /Y %BACKUPFILE% /B %%A\%BACKUPFILE%"
-	REM copy /V /Y "%BACKUPFILE%" /B "%%A\%BACKUPFILE%" >>"%LOGFILE%" 2>&1
 )
 set "LAUNCH="
 call:WaitForLock
@@ -175,7 +173,7 @@ pause
 exit 2
 
 :EXIT_3
-call:EchoAndLog "%InFile% not found exit with rc 2"
+call:EchoAndLog "%INFILE% not found exit with rc 2"
 echo.
 echo.
 pause
@@ -199,7 +197,8 @@ goto:eof
 				REM call:Log "%LOCK_FILES%.%%N exists"
 				
 				9>>"%LOCK_FILES%.%%N" (
-					call:Log "   process %%N finished: Could aquire lock at !time!"
+					echo. Process %%N finished
+					call:Log "   process %%N finished: Could acquired lock at !time!"
 					if defined launch (
 						set "NEXT_PROC=%%N"
 						exit /b
