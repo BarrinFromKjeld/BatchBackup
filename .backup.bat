@@ -4,7 +4,7 @@ setlocal
 REM CONFIG 
 set "NUM_THREADS=8"
 set "DICT_SIZE=1g"
-set "RETENTION=6"
+set "RETENTION=1"
 set "RECOVERY_RECORDS=3"
 set "MAX_PARALLEL_COPY=7"
 
@@ -16,17 +16,17 @@ set "_mm=00"
 FOR /F "skip=1 tokens=1-6" %%G IN ('WMIC Path Win32_LocalTime Get Day^,Hour^,Minute^,Month^,Second^,Year /Format:table') DO (
    IF "%%~L"=="" GOTO :EXIT
       set "_yyyy=%%L"
-      set "_mm=00%%J"
+      set "_mm=%%J"
 )
 :EXIT
-REM Pad digits with leading zeros
-set "_mm=%_mm:~-2%"
 
 set "LOGFILE=backup.log"
 set "WINRAR=%ProgramFiles%\WinRAR\winrar.exe"
 set "YEAR=%_yyyy%"
 set "MONTH=%_mm%"
-set "BACKUPFILE=%YEAR%-%MONTH%_backup.rar"
+set "MONTH_BUFF=0%_mm%"
+set "MONTH_BUFF=%MONTH_BUFF:~-2%
+set "BACKUPFILE=%YEAR%-%MONTH_BUFF%_backup.rar"
 set "INFILE=.LocationsToBackup.lst"
 set "EXCLUDE_FILE=.ExcludeFromBackup.lst"
 set "ADDIT_FILE=.AdditionalLocations.lst"
@@ -46,6 +46,7 @@ call:Log "LOGFILE:          %LOGFILE%"
 call:Log "WINRAR:           %WINRAR%"
 call:Log "YEAR:             %YEAR%"
 call:Log "MONTH:            %MONTH%"
+call:Log "MONTH_BUFF        %MONTH_BUFF%"
 call:Log "BACKUPFILE:       %BACKUPFILE%"
 call:Log "INFILE:           %INFILE%"
 call:Log "EXCLUDE_FILE:     %EXCLUDE_FILE%"
@@ -77,6 +78,14 @@ call:Log " YEAR_O:  %YEAR_O%"
 	call:Log " YEAR_O: %YEAR_O%"
 GOTO :START
 :STOP_RETENTION_CALC
+
+REM Pad digits with leading zeros
+set "MONTH=00%MONTH%"
+set "MONTH_O=00%MONTH_O%"
+set "MONTH=%MONTH:~-2%"
+set "MONTH_O=%MONTH_O:~-2%"
+call:Log "MONTH: %MONTH%"
+call:Log "MONTH_O: %MONTH_O%"
 
 call:EchoAndLog "Following files will be backed up:"
 FOR /F "eol=; tokens=*" %%i in (%INFILE%) DO (
@@ -198,7 +207,7 @@ goto:eof
 				
 				9>>"%LOCK_FILES%.%%N" (
 					echo. Process %%N finished
-					call:Log "   process %%N finished: Could acquired lock at !time!"
+					call:Log "   process %%N finished: Could acquire lock at !time!"
 					if defined launch (
 						set "NEXT_PROC=%%N"
 						exit /b
@@ -228,7 +237,7 @@ goto:eof
 		GOTO :REMOVE_FILE 
 	) 
 	if %mod_yy% EQU %YEAR_O% ( 
-		if %mod_mm% LSS %MONTH_O% ( 
+		if %mod_mm% LEQ %MONTH_O% ( 
 			call:Log "  Delete because of month" 
 			GOTO :REMOVE_FILE 
 		) 
